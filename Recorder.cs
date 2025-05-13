@@ -175,7 +175,7 @@ namespace XeoClip2
 			cleanupThread.Start();
 		}
 
-		private void EnsureFileIsSaved()
+		private async void EnsureFileIsSaved()
 		{
 			try
 			{
@@ -190,6 +190,7 @@ namespace XeoClip2
 
 				// Ensure final recording time is captured
 				recordingEndTime = DateTime.Now;
+
 				UpdateStatus("Recording file saved successfully.");
 				Console.Beep(1150, 150);
 
@@ -198,64 +199,60 @@ namespace XeoClip2
 
 				if (timestamps.Count > 0)
 				{
-					Console.WriteLine($"-- Time_Stamps: {timestamps.Count}");
 					Directory.CreateDirectory(outputFolder); // Ensure directory exists
 
 					using (StreamWriter sw = new StreamWriter(listFile))
 					{
 						foreach (TimeSpan timestamp in timestamps)
 						{
-							Console.WriteLine($"Debug Timestamp: {timestamp}");
 
 							string clipFile = Path.Combine(outputFolder, $"clip_{timestamp.TotalSeconds:F3}.flv");
 							TimeSpan adjustedStartTime = AdjustStartTime(timestamp, GetRecordingDuration());
 							string startTime = adjustedStartTime.ToString(@"hh\:mm\:ss\.fff");
 
-							Console.WriteLine($"Timestamp: {timestamp}, StartTime: {startTime}");
-
 							string ffmpegCommand = $"ffmpeg -hide_banner -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
 							Console.WriteLine($"FFmpeg Command: {ffmpegCommand}");
 
 							// Ensure successful FFmpeg execution before adding to list
-							if (ExecuteFFmpegCommand(ffmpegCommand) && File.Exists(clipFile))
-							{
-								sw.WriteLine($"file '{clipFile}'");
-							}
-							else
-							{
-								Console.WriteLine($"Warning: FFmpeg failed for timestamp {timestamp}");
-							}
+							await ExecuteFFmpegClipAsync(ffmpegCommand, clipFile, sw, timestamp);
 						}
 					}
 
 					// Validate file list before merging
 					if (File.Exists(listFile))
 					{
+						UpdateStatus("Starting Merge..");
 						//
 						// planned : have options for diffrent concating
 						//
-						string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
-						//string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
-						// string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c copy -movflags +faststart \"{mergeFile}\"";
+						string mergeFile = Path.Combine(outputFolder, "merged_output.flv"); // Fastest | instant
+																							//string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
+																							// string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c copy -movflags +faststart \"{mergeFile}\"";
 
 						//
-						// Transitional glitch
+						// Transitional glitch ? Slow 1.5
+						// Ghosting
 						//
-						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" " +
-											  $"-c:v libx264 -bf 16 -g 2000 -sc_threshold 0 " +
-											  $"-fps_mode vfr -pix_fmt yuv420p " +
-											  $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{mergeFile}\"";
+						// string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" " +
+						//					  $"-c:v libx264 -bf 8 -g 300 -x264opts \"ref=1:no-deblock:psy-rd=2.0:bframes=8:aq-mode=0:direct=none\" " +
+						//					  $"-vf \"lagfun=decay=0.9\" " +
+						//					  $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{mergeFile}\"";
+						//
+
+						//
+						// CRT/VHS-Style Concat Command v1
+						//
+						 string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" " +
+											   $"-c:v libx264 -bf 3 -g 120 -sc_threshold 0 " +
+											   $"-vf \"tblend=all_mode=lighten,chromashift=2,noise=alls=15:allf=t,geq=lum='p(X,Y)',deflicker\" " +
+										       $"-c:a aac -b:a 128k -ar 44100 -ac 2 -af \"aphaser=type=t\" -f flv \"{mergeFile}\"";
 
 
+
+
+						UpdateStatus("Merging clips please wait..");
 						Console.WriteLine($"Merging clips into {mergeFile}...");
-						if (ExecuteFFmpegCommand(mergeCommand) && File.Exists(mergeFile))
-						{
-							Console.WriteLine("Merging completed successfully!");
-						}
-						else
-						{
-							Console.WriteLine("Warning: Merge operation failed.");
-						}
+						await ExecuteFFmpegMergeAsync(mergeCommand, mergeFile);
 					}
 				}
 
@@ -264,20 +261,70 @@ namespace XeoClip2
 			catch (Exception ex)
 			{
 				UpdateStatus($"Error during file validation: {ex.ToString()}"); // Full stack trace for debugging
+				UpdateStatus("Critical validation error.");
 			}
+		}
+
+		async Task<bool> ExecuteFFmpegMergeAsync(string mergeCommand, string mergeFile)
+		{
+			bool success = await ExecuteFFmpegCommand(mergeCommand);
+
+			if (success && File.Exists(mergeFile))
+			{
+				Console.WriteLine("Merging completed successfully!");
+				UpdateStatus("Merge of clips finished!");
+			}
+			else
+			{
+				Console.WriteLine("Warning: Merge operation failed.");
+				UpdateStatus("Clips could not be merged.");
+			}
+
+			return success;
+		}
+
+		private async Task<bool> ExecuteFFmpegClipAsync(string ffmpegCommand, string clipFile, StreamWriter sw, TimeSpan timestamp)
+		{
+			bool success = await ExecuteFFmpegCommand(ffmpegCommand);
+
+			if (success && File.Exists(clipFile))
+			{
+				await sw.WriteLineAsync($"file '{clipFile}'");
+				UpdateStatus($"Clipping: '{clipFile}'");
+			}
+			else
+			{
+				Console.WriteLine($"Warning: FFmpeg failed for timestamp {timestamp}");
+				UpdateStatus($"FFmpeg failure for timestamp {timestamp}");
+			}
+
+			return success;
 		}
 
 		//
 		//
-		// Encapsulated FFmpeg Execution
-		private bool ExecuteFFmpegCommand(string command)
+		// Encapsulated FFmpeg Execution v2
+		private async Task<bool> ExecuteFFmpegCommand(string command)
 		{
-			using (Process ffmpegProcess = CreateFFmpegProcess(command))
+			Process ffmpegProcess = CreateFFmpegProcess(command);
+
+			ffmpegProcess.Start();
+			ffmpegProcess.BeginOutputReadLine();
+			// ffmpegProcess.BeginErrorReadLine();
+			ffmpegProcess.PriorityClass = ProcessPriorityClass.RealTime;
+
+			ffmpegProcess.OutputDataReceived += (sender, args) =>
 			{
-				ffmpegProcess.Start();
-				ffmpegProcess.WaitForExit();
-				return ffmpegProcess.ExitCode == 0;
-			}
+				if (!string.IsNullOrEmpty(args.Data))
+					UpdateStatus($"{args.Data}");
+				// Console.WriteLine($"[FFmpeg Output] {args.Data}");
+			};
+
+			await Task.Run(() => ffmpegProcess.WaitForExit());
+			bool success = ffmpegProcess.ExitCode == 0;
+
+			ffmpegProcess.Close();
+			return success;
 		}
 
 		//
