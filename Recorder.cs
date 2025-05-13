@@ -52,7 +52,7 @@ namespace XeoClip2
 				RedirectStandardInput = true,
 				RedirectStandardError = true,
 				RedirectStandardOutput = true,
-				CreateNoWindow = false
+				CreateNoWindow = true // no window "true"
 			};
 
 			try
@@ -202,10 +202,11 @@ namespace XeoClip2
 
 		private string GetFFmpegCommand(string outputFile)
 		{
-			UpdateStatus("Configuring FFmpeg with virtual-audio-capturer...");
+			UpdateStatus("Configuring optimized FFmpeg parameters for FLV with updated options...");
 
-			return $"-f dshow -i audio=\"virtual-audio-capturer\":video=\"screen-capture-recorder\" " +
-				   $"-c:v libx264 -preset ultrafast -b:v 4000k -maxrate 4000k -bufsize 8000k -pix_fmt yuv420p " +
+			return $"-f dshow -rtbufsize 512M -i audio=\"virtual-audio-capturer\":video=\"screen-capture-recorder\" " +
+				   $"-c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr -cq:v 21 " +
+				   $"-b:v 8M -maxrate:v 16M -bufsize:v 32M -fps_mode cfr " +
 				   $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{outputFile}\"";
 		}
 

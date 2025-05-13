@@ -28,6 +28,7 @@
 		/// </summary>
 		private void InitializeComponent()
 		{
+			System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(Form1));
 			this.button1 = new System.Windows.Forms.Button();
 			this.button2 = new System.Windows.Forms.Button();
 			this.statusStrip1 = new System.Windows.Forms.StatusStrip();
@@ -64,8 +65,9 @@
 			this.statusStrip1.Location = new System.Drawing.Point(0, 197);
 			this.statusStrip1.Name = "statusStrip1";
 			this.statusStrip1.Size = new System.Drawing.Size(501, 22);
+			this.statusStrip1.SizingGrip = false;
 			this.statusStrip1.TabIndex = 2;
-			this.statusStrip1.Text = "statusStrip1";
+			this.statusStrip1.Text = "Status Bar";
 			// 
 			// toolStripStatusLabel1
 			// 
@@ -89,6 +91,7 @@
 			this.Controls.Add(this.button2);
 			this.Controls.Add(this.button1);
 			this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.Fixed3D;
+			this.Icon = ((System.Drawing.Icon)(resources.GetObject("$this.Icon")));
 			this.Name = "Form1";
 			this.Text = "XeoClip2";
 			this.Load += new System.EventHandler(this.Form1_Load);
