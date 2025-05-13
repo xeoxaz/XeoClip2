@@ -5,6 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace XeoClip2
 {
@@ -115,7 +116,7 @@ namespace XeoClip2
 			}
 		}
 
-		public void StopRecording()
+		public async Task StopRecordingAsync()
 		{
 			if (!isRecording)
 				throw new InvalidOperationException("No recording in progress to stop.");
@@ -127,7 +128,7 @@ namespace XeoClip2
 			//
 			// IW
 			//
-			iw.StopWatching();
+			await iw.StopWatchingAsync();
 
 			Thread cleanupThread = new Thread(() =>
 			{
@@ -183,98 +184,60 @@ namespace XeoClip2
 
 				if (string.IsNullOrEmpty(outputFile) || !File.Exists(outputFile))
 				{
-					UpdateStatus("Recording file missing, process failed.");
 					throw new InvalidOperationException("Recording file was not saved properly.");
 				}
 
 				FileInfo fileInfo = new FileInfo(outputFile);
 				if (fileInfo.Length == 0)
 				{
-					UpdateStatus("Warning: The recorded file is empty.");
 					throw new InvalidOperationException("The recorded file is empty.");
 				}
 
 				UpdateStatus("Recording file saved successfully.");
 				Console.Beep(1150, 150);
 
-				// Check for timestamps from IconWatcher
 				List<TimeSpan> timestamps = iw.GetBufferedTimestamps();
 				string listFile = Path.Combine(outputFolder, "filelist.txt");
 
 				if (timestamps.Count > 0)
 				{
 					Console.WriteLine($"-- Time_Stamps: {timestamps.Count}");
-					StreamWriter sw = new StreamWriter(listFile);
-					Process ffmpegProcess = null; // Centralized FFmpeg process handler
 
-					foreach (TimeSpan timestamp in timestamps)
+					using (StreamWriter sw = new StreamWriter(listFile))
 					{
-						Console.WriteLine($"Debug Timestamp: {timestamp}");
-
-						string clipFile = Path.Combine(outputFolder, $"clip_{timestamp.TotalSeconds:F3}.flv");
-
-
-						TimeSpan recordingDuration = GetRecordingDuration();
-						TimeSpan adjustedStartTime = timestamp - TimeSpan.FromSeconds(5);
-
-						if (adjustedStartTime > recordingDuration - TimeSpan.FromSeconds(10))
+						foreach (TimeSpan timestamp in timestamps)
 						{
-							if (recordingDuration.TotalSeconds > 10)
-								adjustedStartTime = recordingDuration - TimeSpan.FromSeconds(10);
+							Console.WriteLine($"Debug Timestamp: {timestamp}");
+
+							string clipFile = Path.Combine(outputFolder, $"clip_{timestamp.TotalSeconds:F3}.flv");
+
+							TimeSpan adjustedStartTime = AdjustStartTime(timestamp, GetRecordingDuration());
+							string startTime = adjustedStartTime.ToString(@"hh\:mm\:ss\.fff");
+
+							Console.WriteLine($"Timestamp: {timestamp}, StartTime: {startTime}");
+
+							string ffmpegCommand = $"ffmpeg -hide_banner -copyts -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
+							Console.WriteLine($"FFmpeg Command: {ffmpegCommand}");
+
+							if (ExecuteFFmpegCommand(ffmpegCommand) && File.Exists(clipFile))
+							{
+								sw.WriteLine($"file '{clipFile}'");
+							}
 							else
-								adjustedStartTime = TimeSpan.Zero; // If video is shorter than 10s, extract from the start
-						}
-
-						string startTime = adjustedStartTime.ToString(@"hh\:mm\:ss\.fff");
-
-
-
-						Console.WriteLine("");
-						Console.WriteLine("");
-						Console.WriteLine($"Timestamp: {timestamp}, StartTime: {startTime}");
-
-						string ffmpegCommand = $"ffmpeg -hide_banner -copyts -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
-						Console.WriteLine($"FFmpeg Command: {ffmpegCommand}");
-
-
-						Console.WriteLine($"Processing clip: {clipFile}");
-
-						ffmpegProcess = CreateFFmpegProcess(ffmpegCommand);
-						ffmpegProcess.Start();
-						ffmpegProcess.WaitForExit();
-
-						// Validate success before adding to list file
-						if (ffmpegProcess.ExitCode == 0 && File.Exists(clipFile))
-						{
-							sw.WriteLine($"file '{clipFile}'");
-						}
-						else
-						{
-							Console.WriteLine($"Warning: FFmpeg failed for timestamp {timestamp}");
+							{
+								Console.WriteLine($"Warning: FFmpeg failed for timestamp {timestamp}");
+							}
 						}
 					}
 
-					sw.Close();
-					ffmpegProcess?.Dispose(); // Dispose the FFmpeg instance after clipping
-
-					//
-					// Merge clips
-					//
-					//
 					string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
 					string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
 
 					Console.WriteLine($"Merging clips into {mergeFile}...");
-
-					ffmpegProcess = CreateFFmpegProcess(mergeCommand);
-					ffmpegProcess.Start();
-					ffmpegProcess.WaitForExit();
-					ffmpegProcess.Dispose(); // Ensure FFmpeg process is properly closed
-
+					ExecuteFFmpegCommand(mergeCommand);
 					Console.WriteLine("Merging completed!");
 				}
 
-				// Clear timestamps after processing
 				iw.ClearBufferedTimestamps();
 			}
 			catch (Exception ex)
@@ -282,6 +245,29 @@ namespace XeoClip2
 				UpdateStatus($"Error during file validation: {ex.Message}");
 			}
 		}
+
+		// Encapsulated FFmpeg Execution
+		private bool ExecuteFFmpegCommand(string command)
+		{
+			using (Process ffmpegProcess = CreateFFmpegProcess(command))
+			{
+				ffmpegProcess.Start();
+				ffmpegProcess.WaitForExit();
+				return ffmpegProcess.ExitCode == 0;
+			}
+		}
+
+		// Improved Timestamp Adjustment Logic
+		private TimeSpan AdjustStartTime(TimeSpan timestamp, TimeSpan recordingDuration)
+		{
+			TimeSpan adjustedStartTime = timestamp - TimeSpan.FromSeconds(5);
+			return adjustedStartTime > recordingDuration - TimeSpan.FromSeconds(10)
+				? recordingDuration.TotalSeconds > 10
+					? recordingDuration - TimeSpan.FromSeconds(10)
+					: TimeSpan.Zero
+				: adjustedStartTime;
+		}
+
 
 		private string GetFFmpegPath()
 		{
@@ -345,12 +331,12 @@ namespace XeoClip2
 		}
 
 
-		public void Dispose()
+		public async void Dispose()
 		{
 			if (isRecording)
 			{
 				UpdateStatus("Disposing recorder and stopping any active processes...");
-				StopRecording();
+				await StopRecordingAsync();
 			}
 
 			UpdateStatus("Final cleanup...");

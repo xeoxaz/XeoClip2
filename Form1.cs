@@ -27,13 +27,13 @@ namespace XeoClip2
 			toolStripStatusLabel2.Text = "Awaiting command..";
 		}
 
-		private void button1_Click(object sender, EventArgs e)
+		private async void button1_Click(object sender, EventArgs e)
 		{
 			try
 			{
 				if (recorder.IsRecording)
 				{
-					recorder.StopRecording();
+					await recorder.StopRecordingAsync();
 					button1.Text = "Start";
 				}
 				else

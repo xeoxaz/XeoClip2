@@ -5,12 +5,12 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace XeoClip2
 {
 	internal class IconWatcher
 	{
-		private readonly string iconsPath;
 
 		// Update the nullable reference type declaration to remove the nullable annotation (?)  
 		private Thread watcherThread;
@@ -88,7 +88,7 @@ namespace XeoClip2
 		}
 
 
-		public void StopWatching()
+		public async Task StopWatchingAsync()
 		{
 			if (!isWatching)
 			{
@@ -98,7 +98,12 @@ namespace XeoClip2
 
 			Console.WriteLine("Stopping IconWatcher...");
 			isWatching = false;
-			watcherThread?.Join();
+
+			if (watcherThread != null)
+			{
+				await Task.Run(() => watcherThread.Join());
+			}
+
 			Console.WriteLine("IconWatcher has stopped.");
 		}
 
