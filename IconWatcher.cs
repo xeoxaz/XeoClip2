@@ -66,6 +66,8 @@ namespace XeoClip2
 
 							Console.WriteLine($"Icon detected at {detectionTime}, Relative Timestamp: {startTime}. Checking timestamp gap...");
 
+							bool validDetection = false;
+
 							// Thread-safe timestamp storage and gap enforcement
 							lock (detectionTimestamps)
 							{
@@ -74,17 +76,26 @@ namespace XeoClip2
 									TimeSpan lastTimestamp = detectionTimestamps.Last();
 									TimeSpan gap = relativeTimestamp - lastTimestamp;
 
-									if (gap < TimeSpan.FromSeconds(15))
+									if (gap >= TimeSpan.FromSeconds(15)) // Enforce minimum detection gap
 									{
-										Console.WriteLine($"Last detection was {gap.TotalSeconds:F3} seconds ago. Waiting...");
-										Thread.Sleep(TimeSpan.FromSeconds(15) - gap);
+										validDetection = true;
+									}
+									else
+									{
+										Console.WriteLine($"Detection too close to previous ({gap.TotalSeconds:F3}s). Ignoring.");
 									}
 								}
+								else
+								{
+									validDetection = true; // First detection allowed
+								}
 
-								detectionTimestamps.Add(relativeTimestamp);
+								if (validDetection)
+								{
+									detectionTimestamps.Add(relativeTimestamp);
+									Console.WriteLine("Timestamp recorded. Continuing icon watching...");
+								}
 							}
-
-							Console.WriteLine("Timestamp recorded. Continuing icon watching...");
 						}
 					}
 				}
@@ -102,6 +113,7 @@ namespace XeoClip2
 
 			watcherThread.Start();
 		}
+
 
 
 
@@ -185,7 +197,7 @@ namespace XeoClip2
 				var frameEdges = ApplyCannyEdgeDetection(grayFrame);
 				var iconEdges = ApplyCannyEdgeDetection(icon);
 
-				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.20, out matchValue);
+				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.40, out matchValue);
 
 				// Explicitly dispose of resources after use
 				grayFrame.Dispose();

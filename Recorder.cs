@@ -232,7 +232,8 @@ namespace XeoClip2
 					if (File.Exists(listFile))
 					{
 						string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
-						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
+						//string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
+						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c copy -movflags +faststart \"{mergeFile}\"";
 
 						Console.WriteLine($"Merging clips into {mergeFile}...");
 						if (ExecuteFFmpegCommand(mergeCommand) && File.Exists(mergeFile))
