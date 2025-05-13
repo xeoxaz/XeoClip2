@@ -231,9 +231,21 @@ namespace XeoClip2
 					// Validate file list before merging
 					if (File.Exists(listFile))
 					{
+						//
+						// planned : have options for diffrent concating
+						//
 						string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
 						//string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
-						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c copy -movflags +faststart \"{mergeFile}\"";
+						// string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c copy -movflags +faststart \"{mergeFile}\"";
+
+						//
+						// Transitional glitch
+						//
+						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" " +
+											  $"-c:v libx264 -bf 16 -g 2000 -sc_threshold 0 " +
+											  $"-fps_mode vfr -pix_fmt yuv420p " +
+											  $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{mergeFile}\"";
+
 
 						Console.WriteLine($"Merging clips into {mergeFile}...");
 						if (ExecuteFFmpegCommand(mergeCommand) && File.Exists(mergeFile))
@@ -255,7 +267,8 @@ namespace XeoClip2
 			}
 		}
 
-
+		//
+		//
 		// Encapsulated FFmpeg Execution
 		private bool ExecuteFFmpegCommand(string command)
 		{
@@ -267,7 +280,9 @@ namespace XeoClip2
 			}
 		}
 
+		//
 		// Improved Timestamp Adjustment Logic
+		//
 		private TimeSpan AdjustStartTime(TimeSpan timestamp, TimeSpan recordingDuration)
 		{
 			// Introduce random offset safely
@@ -283,9 +298,9 @@ namespace XeoClip2
 			return adjustedStartTime > minStartTime ? minStartTime : adjustedStartTime;
 		}
 
-
-
-
+		//
+		// Check if you can run this program (duh)
+		//
 		private string GetFFmpegPath()
 		{
 			UpdateStatus("Locating FFmpeg executable...");
@@ -316,6 +331,9 @@ namespace XeoClip2
 			return null;
 		}
 
+		//
+		// FFmpeg command for recording (Main encoding)
+		//
 		private string GetFFmpegCommand(string outputFile)
 		{
 			UpdateStatus("Configuring optimized FFmpeg parameters for FLV with updated options...");
@@ -326,6 +344,9 @@ namespace XeoClip2
 				   $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{outputFile}\"";
 		}
 
+		//
+		// Create FFmpeg process
+		//
 		private Process CreateFFmpegProcess(string command)
 		{
 			Console.WriteLine("-- Create_Process: ");
@@ -342,12 +363,17 @@ namespace XeoClip2
 			};
 		}
 
+		//
+		// Get recording duration
+		//
 		private TimeSpan GetRecordingDuration()
 		{
 			return recordingEndTime - recordingStartTime;
 		}
 
-
+		//
+		// Clean up
+		//
 		public async void Dispose()
 		{
 			if (isRecording)
