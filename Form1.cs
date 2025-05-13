@@ -69,7 +69,6 @@ namespace XeoClip2
 		{
 			FileManager manager = new FileManager();
 			manager.OpenFolder(manager.IconsFolder);
-			manager.StartWatchingIconsFolder();
 		}
 	}
 }

@@ -1,17 +1,32 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Text.RegularExpressions;
 using System.Threading;
 
 namespace XeoClip2
 {
 	public class Recorder : IDisposable
 	{
+
+		// Recording
+		//
+		private DateTime recordingStartTime;
+		private DateTime recordingEndTime;
+		//
+		//
+		//
+
 		private Process ffmpegProcess;
 		private bool isRecording;
 		private string outputFile;
 
 		public event Action<string> RecordingStatusChanged;
+
+		IconWatcher iw = new IconWatcher();
+		private string outputFolder;
 
 		private void UpdateStatus(string message)
 		{
@@ -27,7 +42,7 @@ namespace XeoClip2
 
 			// Generate timestamped output folder
 			string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-			string outputFolder = Path.Combine(baseFolder, timestamp);
+			outputFolder = Path.Combine(baseFolder, timestamp);
 			Directory.CreateDirectory(outputFolder);
 
 			outputFile = Path.Combine(outputFolder, "recording.flv");
@@ -76,6 +91,8 @@ namespace XeoClip2
 
 				// Start FFmpeg recording
 				ffmpegProcess.Start();
+				recordingStartTime = DateTime.Now; // start time
+
 				ffmpegProcess.BeginOutputReadLine();
 				ffmpegProcess.BeginErrorReadLine();
 				ffmpegProcess.PriorityClass = ProcessPriorityClass.RealTime;
@@ -83,6 +100,12 @@ namespace XeoClip2
 				isRecording = true;
 				UpdateStatus("Recording started successfully.");
 				Console.Beep(1300, 150);
+
+				//
+				// IW
+				//
+				iw.StartWatching(recordingStartTime);
+
 				return outputFile;
 			}
 			catch (Exception ex)
@@ -98,6 +121,13 @@ namespace XeoClip2
 				throw new InvalidOperationException("No recording in progress to stop.");
 
 			UpdateStatus("Stopping recording, please wait...");
+
+			// Maybe?
+			recordingEndTime = DateTime.Now;
+			//
+			// IW
+			//
+			iw.StopWatching();
 
 			Thread cleanupThread = new Thread(() =>
 			{
@@ -130,6 +160,8 @@ namespace XeoClip2
 						ffmpegProcess = null;
 					}
 				}
+
+				
 
 				EnsureFileIsSaved();
 				isRecording = false;
@@ -164,11 +196,90 @@ namespace XeoClip2
 
 				UpdateStatus("Recording file saved successfully.");
 				Console.Beep(1150, 150);
+
+				// Check for timestamps from IconWatcher
+				List<TimeSpan> timestamps = iw.GetBufferedTimestamps();
+				string listFile = Path.Combine(outputFolder, "filelist.txt");
+
+				if (timestamps.Count > 0)
+				{
+					Console.WriteLine($"-- Time_Stamps: {timestamps.Count}");
+					StreamWriter sw = new StreamWriter(listFile);
+					Process ffmpegProcess = null; // Centralized FFmpeg process handler
+
+					foreach (TimeSpan timestamp in timestamps)
+					{
+						Console.WriteLine($"Debug Timestamp: {timestamp}");
+
+						string clipFile = Path.Combine(outputFolder, $"clip_{timestamp.TotalSeconds:F3}.flv");
+
+
+						TimeSpan recordingDuration = GetRecordingDuration();
+						TimeSpan adjustedStartTime = timestamp - TimeSpan.FromSeconds(5);
+
+						if (adjustedStartTime > recordingDuration - TimeSpan.FromSeconds(10))
+						{
+							if (recordingDuration.TotalSeconds > 10)
+								adjustedStartTime = recordingDuration - TimeSpan.FromSeconds(10);
+							else
+								adjustedStartTime = TimeSpan.Zero; // If video is shorter than 10s, extract from the start
+						}
+
+						string startTime = adjustedStartTime.ToString(@"hh\:mm\:ss\.fff");
+
+
+
+						Console.WriteLine("");
+						Console.WriteLine("");
+						Console.WriteLine($"Timestamp: {timestamp}, StartTime: {startTime}");
+
+						string ffmpegCommand = $"ffmpeg -hide_banner -copyts -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
+						Console.WriteLine($"FFmpeg Command: {ffmpegCommand}");
+
+
+						Console.WriteLine($"Processing clip: {clipFile}");
+
+						ffmpegProcess = CreateFFmpegProcess(ffmpegCommand);
+						ffmpegProcess.Start();
+						ffmpegProcess.WaitForExit();
+
+						// Validate success before adding to list file
+						if (ffmpegProcess.ExitCode == 0 && File.Exists(clipFile))
+						{
+							sw.WriteLine($"file '{clipFile}'");
+						}
+						else
+						{
+							Console.WriteLine($"Warning: FFmpeg failed for timestamp {timestamp}");
+						}
+					}
+
+					sw.Close();
+					ffmpegProcess?.Dispose(); // Dispose the FFmpeg instance after clipping
+
+					//
+					// Merge clips
+					//
+					//
+					string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
+					string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
+
+					Console.WriteLine($"Merging clips into {mergeFile}...");
+
+					ffmpegProcess = CreateFFmpegProcess(mergeCommand);
+					ffmpegProcess.Start();
+					ffmpegProcess.WaitForExit();
+					ffmpegProcess.Dispose(); // Ensure FFmpeg process is properly closed
+
+					Console.WriteLine("Merging completed!");
+				}
+
+				// Clear timestamps after processing
+				iw.ClearBufferedTimestamps();
 			}
 			catch (Exception ex)
 			{
 				UpdateStatus($"Error during file validation: {ex.Message}");
-//				throw; // Re-throwing to ensure caller handles it appropriately
 			}
 		}
 
@@ -212,6 +323,26 @@ namespace XeoClip2
 				   $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{outputFile}\"";
 		}
 
+		private Process CreateFFmpegProcess(string command)
+		{
+			Console.WriteLine("-- Create_Process: ");
+			return new Process
+			{
+				StartInfo = new ProcessStartInfo
+				{
+					FileName = "cmd.exe",
+					Arguments = $"/C {command}",
+					RedirectStandardOutput = true,
+					UseShellExecute = false,
+					CreateNoWindow = true
+				}
+			};
+		}
+
+		private TimeSpan GetRecordingDuration()
+		{
+			return recordingEndTime - recordingStartTime;
+		}
 
 
 		public void Dispose()

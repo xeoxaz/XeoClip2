@@ -10,9 +10,6 @@ namespace XeoClip2
 	{
 		public string BaseFolder { get; private set; }
 		public string IconsFolder { get; private set; }
-		private FileSystemWatcher watcher;
-
-		public HashSet<string> ImageFiles { get; private set; } = new HashSet<string>();
 
 
 		public FileManager()
@@ -22,9 +19,6 @@ namespace XeoClip2
 
 			CreateFolder(BaseFolder);
 			CreateFolder(IconsFolder);
-
-			LoadExistingImages(); // Load images on startup
-			StartWatchingIconsFolder(); // Start monitoring folder
 		}
 
 		private string GetBaseFolder()
@@ -55,44 +49,6 @@ namespace XeoClip2
 			{
 				throw new DirectoryNotFoundException($"The folder '{folderPath}' does not exist.");
 			}
-		}
-
-		private void LoadExistingImages()
-		{
-			try
-			{
-				// Get all PNG files
-				string[] files = Directory.GetFiles(IconsFolder, "*.png");
-				Console.WriteLine("__ [ Files in Dir ] __");
-				ImageFiles.Clear(); // Clear existing files to avoid duplicates
-									// Add only unique files (HashSet ensures no duplicates)
-				foreach (string file in files)
-				{
-					ImageFiles.Add(file); // HashSet's Add() prevents duplicates
-				}
-
-				foreach (string file in ImageFiles)
-				{
-					Console.WriteLine($"Loaded image: {file}");
-				}
-			}
-			catch (Exception ex)
-			{
-				Console.WriteLine($"Error loading images: {ex.Message}");
-			}
-		}
-
-		public void StartWatchingIconsFolder()
-		{
-			watcher = new FileSystemWatcher(IconsFolder, "*.png");
-			watcher.Created += (s, e) =>
-			{
-				if (ImageFiles.Add(e.FullPath)) // HashSet ensures uniqueness
-				{
-					Console.WriteLine($"New image added: {e.FullPath}");
-				}
-			};
-			watcher.EnableRaisingEvents = true;
 		}
 
 		public void OpenBaseFolder()

@@ -1,0 +1,214 @@
+﻿using OpenCvSharp;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Threading;
+
+namespace XeoClip2
+{
+	internal class IconWatcher
+	{
+		private readonly string iconsPath;
+
+		// Update the nullable reference type declaration to remove the nullable annotation (?)  
+		private Thread watcherThread;
+		private volatile bool isWatching;
+
+		// Replace the target-typed object creation with explicit type initialization to ensure compatibility with C# 7.3.
+		private readonly List<TimeSpan> detectionTimestamps = new List<TimeSpan>(); // Buffer to store timestamps
+
+		public IconWatcher() {
+			//
+			// xeoxaz was here :)
+			//
+		}
+
+		public void StartWatching(DateTime recordingStartTime)
+		{
+			if (isWatching)
+			{
+				Console.WriteLine("IconWatcher is already running.");
+				return;
+			}
+
+			var manager = new FileManager();
+			var icons = LoadIcons(manager.IconsFolder);
+
+			if (icons.Length == 0)
+			{
+				Console.WriteLine("No icons found in the icons folder. IconWatcher will not run.");
+				return;
+			}
+
+			isWatching = true;
+			Console.WriteLine("Starting IconWatcher...");
+
+			watcherThread = new Thread(() =>
+			{
+				try
+				{
+					while (isWatching)
+					{
+						var screenshot = CaptureScreen(); // No using statement
+
+						if (!TryDetectIcons(screenshot, icons))
+						{
+							Thread.Sleep(100); // every 100ms change for aggression
+							continue;
+						}
+
+						DateTime detectionTime = DateTime.Now;
+						TimeSpan relativeTimestamp = detectionTime - recordingStartTime;
+						string startTime = relativeTimestamp.ToString(@"hh\:mm\:ss\.fff");
+
+						Console.WriteLine($"Icon detected at {detectionTime}, Relative Timestamp: {startTime}. Buffering timestamp...");
+						detectionTimestamps.Add(relativeTimestamp);
+
+						Console.WriteLine("Waiting 10 seconds before checking for the next icon...");
+						Thread.Sleep(TimeSpan.FromSeconds(10));
+
+						// Explicitly dispose of the screenshot after use
+						screenshot.Dispose();
+					}
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine($"Error in IconWatcher thread: {ex.Message}");
+				}
+				finally
+				{
+					Console.WriteLine("IconWatcher stopped.");
+				}
+			})
+			{ IsBackground = true };
+
+			watcherThread.Start();
+		}
+
+
+		public void StopWatching()
+		{
+			if (!isWatching)
+			{
+				Console.WriteLine("IconWatcher is not running.");
+				return;
+			}
+
+			Console.WriteLine("Stopping IconWatcher...");
+			isWatching = false;
+			watcherThread?.Join();
+			Console.WriteLine("IconWatcher has stopped.");
+		}
+
+		public List<TimeSpan> GetBufferedTimestamps()
+		{
+			return new List<TimeSpan>(detectionTimestamps);
+		}
+
+		public void ClearBufferedTimestamps()
+		{
+			detectionTimestamps.Clear();
+			Console.WriteLine("Buffered timestamps have been cleared.");
+		}
+
+		private Mat[] LoadIcons(string path)
+		{
+			var files = Directory.GetFiles(path, "*.png");
+			Console.WriteLine($"Found {files.Length} icon(s) in {path}.");
+			return Array.ConvertAll(files, file => Cv2.ImRead(file, ImreadModes.Grayscale));
+		}
+
+		private Bitmap CaptureScreen()
+		{
+			var bounds = System.Windows.Forms.Screen.PrimaryScreen.Bounds;
+			var screenshot = new Bitmap(bounds.Width, bounds.Height, PixelFormat.Format32bppArgb);
+
+			var graphics = Graphics.FromImage(screenshot);
+			graphics.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
+
+			graphics.Dispose(); // Explicitly dispose the Graphics object
+
+			return screenshot;
+		}
+
+
+		private bool TryDetectIcons(Bitmap screenshot, Mat[] icons)
+		{
+			var frame = OpenCvSharp.Extensions.BitmapConverter.ToMat(screenshot); // Removed using
+
+			foreach (var icon in icons)
+			{
+				if (DetectIcon(frame, icon, out double matchValue))
+				{
+					Console.WriteLine($"Match Value: {matchValue:F2} (Threshold: 0.8)");
+					frame.Dispose(); // Explicitly dispose of Mat before returning
+					return true;
+				}
+			}
+
+			frame.Dispose(); // Ensure cleanup before returning false
+			return false;
+		}
+
+
+		private bool DetectIcon(Mat frame, Mat icon, out double matchValue)
+		{
+			matchValue = 0.0;
+
+			try
+			{
+				var grayFrame = ConvertToGrayscale(frame);
+				var frameEdges = ApplyCannyEdgeDetection(grayFrame);
+				var iconEdges = ApplyCannyEdgeDetection(icon);
+
+				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.8, out matchValue);
+
+				// Explicitly dispose of resources after use
+				grayFrame.Dispose();
+				frameEdges.Dispose();
+				iconEdges.Dispose();
+
+				return result;
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine($"Error during icon detection: {ex.Message}");
+				return false;
+			}
+		}
+
+
+		private Mat ConvertToGrayscale(Mat input)
+		{
+			if (input.Channels() == 1) return input.Clone();
+
+			var grayscale = new Mat();
+			Cv2.CvtColor(input, grayscale, ColorConversionCodes.BGR2GRAY);
+			return grayscale;
+		}
+
+		private Mat ApplyCannyEdgeDetection(Mat input, double threshold1 = 100, double threshold2 = 200)
+		{
+			var edges = new Mat();
+			Cv2.Canny(input, edges, threshold1, threshold2);
+			return edges;
+		}
+
+		private bool PerformTemplateMatching(Mat frameEdges, Mat iconEdges, double threshold, out double matchValue)
+		{
+			var result = new Mat(); // Removed using statement
+
+			Cv2.MatchTemplate(frameEdges, iconEdges, result, TemplateMatchModes.CCoeffNormed);
+			Cv2.MinMaxLoc(result, out _, out matchValue, out _, out _);
+
+			bool isMatch = matchValue > threshold;
+
+			result.Dispose(); // Explicitly dispose of Mat resource
+
+			return isMatch;
+		}
+
+	}
+}
