@@ -13,6 +13,8 @@ namespace XeoClip2
 	internal class IconWatcher
 	{
 
+		private float thresHold = 0.30f;
+
 		// Update the nullable reference type declaration to remove the nullable annotation (?)  
 		private Thread watcherThread;
 		private volatile bool isWatching;
@@ -176,7 +178,7 @@ namespace XeoClip2
 			{
 				if (DetectIcon(frame, icon, out double matchValue))
 				{
-					Console.WriteLine($"Match Value: {matchValue:F2} (Threshold: 0.8)");
+					//Console.WriteLine($"Match Value: {matchValue:F2} (Threshold: 0.8)");
 					frame.Dispose(); // Explicitly dispose of Mat before returning
 					return true;
 				}
@@ -186,7 +188,9 @@ namespace XeoClip2
 			return false;
 		}
 
-
+		//
+		// DetectIcon
+		//
 		private bool DetectIcon(Mat frame, Mat icon, out double matchValue)
 		{
 			matchValue = 0.0;
@@ -197,7 +201,12 @@ namespace XeoClip2
 				var frameEdges = ApplyCannyEdgeDetection(grayFrame);
 				var iconEdges = ApplyCannyEdgeDetection(icon);
 
-				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.40, out matchValue);
+				//
+				// sometimes misstakes icons
+				//
+
+				bool result = PerformTemplateMatching(frameEdges, iconEdges, thresHold, out matchValue);
+				
 
 				// Explicitly dispose of resources after use
 				grayFrame.Dispose();
@@ -237,7 +246,7 @@ namespace XeoClip2
 			Cv2.MatchTemplate(frameEdges, iconEdges, result, TemplateMatchModes.CCoeffNormed);
 			Cv2.MinMaxLoc(result, out _, out matchValue, out _, out _);
 
-			Console.WriteLine($"match: ${matchValue}, threshold: ${threshold}");
+			//Console.WriteLine($"match: ${matchValue}, threshold: ${threshold}");
 
 			bool isMatch = matchValue > threshold;
 

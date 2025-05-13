@@ -320,9 +320,9 @@ namespace XeoClip2
 		{
 			UpdateStatus("Configuring optimized FFmpeg parameters for FLV with updated options...");
 
-			return $"-f dshow -rtbufsize 512M -i audio=\"virtual-audio-capturer\":video=\"screen-capture-recorder\" " +
-				   $"-c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr -cq:v 21 " +
-				   $"-b:v 8M -maxrate:v 16M -bufsize:v 32M -fps_mode cfr " +
+			return $"-f dshow -rtbufsize 1G -i audio=\"virtual-audio-capturer\":video=\"screen-capture-recorder\" " +
+				   $"-c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr -cq:v 19 " +
+				   $"-b:v 12M -maxrate:v 24M -bufsize:v 48M -fps_mode cfr -filter:v \"fps=60,scale=1920:1080\" " +
 				   $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{outputFile}\"";
 		}
 
