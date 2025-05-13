@@ -123,8 +123,7 @@ namespace XeoClip2
 
 			UpdateStatus("Stopping recording, please wait...");
 
-			// Maybe?
-			recordingEndTime = DateTime.Now;
+			
 			//
 			// IW
 			//
@@ -183,16 +182,14 @@ namespace XeoClip2
 				UpdateStatus("Validating recorded file...");
 
 				if (string.IsNullOrEmpty(outputFile) || !File.Exists(outputFile))
-				{
 					throw new InvalidOperationException("Recording file was not saved properly.");
-				}
 
 				FileInfo fileInfo = new FileInfo(outputFile);
 				if (fileInfo.Length == 0)
-				{
 					throw new InvalidOperationException("The recorded file is empty.");
-				}
 
+				// Ensure final recording time is captured
+				recordingEndTime = DateTime.Now;
 				UpdateStatus("Recording file saved successfully.");
 				Console.Beep(1150, 150);
 
@@ -202,6 +199,7 @@ namespace XeoClip2
 				if (timestamps.Count > 0)
 				{
 					Console.WriteLine($"-- Time_Stamps: {timestamps.Count}");
+					Directory.CreateDirectory(outputFolder); // Ensure directory exists
 
 					using (StreamWriter sw = new StreamWriter(listFile))
 					{
@@ -210,15 +208,15 @@ namespace XeoClip2
 							Console.WriteLine($"Debug Timestamp: {timestamp}");
 
 							string clipFile = Path.Combine(outputFolder, $"clip_{timestamp.TotalSeconds:F3}.flv");
-
 							TimeSpan adjustedStartTime = AdjustStartTime(timestamp, GetRecordingDuration());
 							string startTime = adjustedStartTime.ToString(@"hh\:mm\:ss\.fff");
 
 							Console.WriteLine($"Timestamp: {timestamp}, StartTime: {startTime}");
 
-							string ffmpegCommand = $"ffmpeg -hide_banner -copyts -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
+							string ffmpegCommand = $"ffmpeg -hide_banner -ss {startTime} -i \"{outputFile}\" -t 10 -c copy -f flv \"{clipFile}\"";
 							Console.WriteLine($"FFmpeg Command: {ffmpegCommand}");
 
+							// Ensure successful FFmpeg execution before adding to list
 							if (ExecuteFFmpegCommand(ffmpegCommand) && File.Exists(clipFile))
 							{
 								sw.WriteLine($"file '{clipFile}'");
@@ -230,21 +228,32 @@ namespace XeoClip2
 						}
 					}
 
-					string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
-					string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
+					// Validate file list before merging
+					if (File.Exists(listFile))
+					{
+						string mergeFile = Path.Combine(outputFolder, "merged_output.flv");
+						string mergeCommand = $"ffmpeg -hide_banner -f concat -safe 0 -i \"{listFile}\" -c:v libx264 -c:a aac \"{mergeFile}\"";
 
-					Console.WriteLine($"Merging clips into {mergeFile}...");
-					ExecuteFFmpegCommand(mergeCommand);
-					Console.WriteLine("Merging completed!");
+						Console.WriteLine($"Merging clips into {mergeFile}...");
+						if (ExecuteFFmpegCommand(mergeCommand) && File.Exists(mergeFile))
+						{
+							Console.WriteLine("Merging completed successfully!");
+						}
+						else
+						{
+							Console.WriteLine("Warning: Merge operation failed.");
+						}
+					}
 				}
 
 				iw.ClearBufferedTimestamps();
 			}
 			catch (Exception ex)
 			{
-				UpdateStatus($"Error during file validation: {ex.Message}");
+				UpdateStatus($"Error during file validation: {ex.ToString()}"); // Full stack trace for debugging
 			}
 		}
+
 
 		// Encapsulated FFmpeg Execution
 		private bool ExecuteFFmpegCommand(string command)
@@ -260,13 +269,20 @@ namespace XeoClip2
 		// Improved Timestamp Adjustment Logic
 		private TimeSpan AdjustStartTime(TimeSpan timestamp, TimeSpan recordingDuration)
 		{
-			TimeSpan adjustedStartTime = timestamp - TimeSpan.FromSeconds(5);
-			return adjustedStartTime > recordingDuration - TimeSpan.FromSeconds(10)
-				? recordingDuration.TotalSeconds > 10
-					? recordingDuration - TimeSpan.FromSeconds(10)
-					: TimeSpan.Zero
-				: adjustedStartTime;
+			// Introduce random offset safely
+			int randomOffset = new Random().Next(-7, -3); // Random shift between -3s and -7s
+			TimeSpan adjustedStartTime = timestamp + TimeSpan.FromSeconds(randomOffset);
+
+			// Ensure adjusted start time doesn't exceed safe bounds
+			TimeSpan minStartTime = recordingDuration > TimeSpan.FromSeconds(10)
+				? recordingDuration - TimeSpan.FromSeconds(10)
+				: TimeSpan.Zero;
+
+			// Manual comparison since TimeSpan.Max doesn't exist
+			return adjustedStartTime > minStartTime ? minStartTime : adjustedStartTime;
 		}
+
+
 
 
 		private string GetFFmpegPath()

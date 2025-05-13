@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -51,34 +52,49 @@ namespace XeoClip2
 				{
 					while (isWatching)
 					{
-						var screenshot = CaptureScreen(); // No using statement
-
-						if (!TryDetectIcons(screenshot, icons))
+						using (var screenshot = CaptureScreen()) // Proper disposal
 						{
-							Thread.Sleep(100); // every 100ms change for aggression
-							continue;
+							if (!TryDetectIcons(screenshot, icons))
+							{
+								Thread.Sleep(100); // Tune scan aggression
+								continue;
+							}
+
+							DateTime detectionTime = DateTime.Now;
+							TimeSpan relativeTimestamp = detectionTime - recordingStartTime;
+							string startTime = relativeTimestamp.ToString(@"hh\:mm\:ss\.fff");
+
+							Console.WriteLine($"Icon detected at {detectionTime}, Relative Timestamp: {startTime}. Checking timestamp gap...");
+
+							// Thread-safe timestamp storage and gap enforcement
+							lock (detectionTimestamps)
+							{
+								if (detectionTimestamps.Count > 0)
+								{
+									TimeSpan lastTimestamp = detectionTimestamps.Last();
+									TimeSpan gap = relativeTimestamp - lastTimestamp;
+
+									if (gap < TimeSpan.FromSeconds(15))
+									{
+										Console.WriteLine($"Last detection was {gap.TotalSeconds:F3} seconds ago. Waiting...");
+										Thread.Sleep(TimeSpan.FromSeconds(15) - gap);
+									}
+								}
+
+								detectionTimestamps.Add(relativeTimestamp);
+							}
+
+							Console.WriteLine("Timestamp recorded. Continuing icon watching...");
 						}
-
-						DateTime detectionTime = DateTime.Now;
-						TimeSpan relativeTimestamp = detectionTime - recordingStartTime;
-						string startTime = relativeTimestamp.ToString(@"hh\:mm\:ss\.fff");
-
-						Console.WriteLine($"Icon detected at {detectionTime}, Relative Timestamp: {startTime}. Buffering timestamp...");
-						detectionTimestamps.Add(relativeTimestamp);
-
-						Console.WriteLine("Waiting 10 seconds before checking for the next icon...");
-						Thread.Sleep(TimeSpan.FromSeconds(10));
-
-						// Explicitly dispose of the screenshot after use
-						screenshot.Dispose();
 					}
 				}
 				catch (Exception ex)
 				{
-					Console.WriteLine($"Error in IconWatcher thread: {ex.Message}");
+					Console.WriteLine($"Error in IconWatcher thread: {ex.Message}\n{ex.StackTrace}");
 				}
 				finally
 				{
+					isWatching = false;
 					Console.WriteLine("IconWatcher stopped.");
 				}
 			})
@@ -86,6 +102,7 @@ namespace XeoClip2
 
 			watcherThread.Start();
 		}
+
 
 
 		public async Task StopWatchingAsync()
@@ -168,7 +185,7 @@ namespace XeoClip2
 				var frameEdges = ApplyCannyEdgeDetection(grayFrame);
 				var iconEdges = ApplyCannyEdgeDetection(icon);
 
-				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.8, out matchValue);
+				bool result = PerformTemplateMatching(frameEdges, iconEdges, 0.20, out matchValue);
 
 				// Explicitly dispose of resources after use
 				grayFrame.Dispose();
@@ -207,6 +224,8 @@ namespace XeoClip2
 
 			Cv2.MatchTemplate(frameEdges, iconEdges, result, TemplateMatchModes.CCoeffNormed);
 			Cv2.MinMaxLoc(result, out _, out matchValue, out _, out _);
+
+			Console.WriteLine($"match: ${matchValue}, threshold: ${threshold}");
 
 			bool isMatch = matchValue > threshold;
 
