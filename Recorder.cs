@@ -82,6 +82,7 @@ namespace XeoClip2
 
 				isRecording = true;
 				UpdateStatus("Recording started successfully.");
+				Console.Beep(1300, 150);
 				return outputFile;
 			}
 			catch (Exception ex)
@@ -140,6 +141,7 @@ namespace XeoClip2
 			};
 
 			cleanupThread.Start();
+			Console.Beep(1150, 150);
 		}
 
 		private void EnsureFileIsSaved()

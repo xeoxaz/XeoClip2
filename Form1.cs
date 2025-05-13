@@ -64,5 +64,12 @@ namespace XeoClip2
 		{
 
 		}
+
+		private void button3_Click(object sender, EventArgs e)
+		{
+			FileManager manager = new FileManager();
+			manager.OpenFolder(manager.IconsFolder);
+			manager.StartWatchingIconsFolder();
+		}
 	}
 }
