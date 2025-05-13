@@ -16,14 +16,7 @@ ffmpeg -version
 ### Install Screen Capture & Audio Drivers
 - **Download** and **install** [Screen Capture Recorder](https://github.com/rdp/screen-capture-recorder-to-video-windows-free).
 - **Install VB-Audio Virtual Cable** (if needed for stable system sound capture).
-## Usage
-### Start Recording
-XeoClip2 --start --output "C:\Recordings"
-Creates a timestamped folder and begins the recording process.
 
-### Stop Recording
-XeoClip2 --stop
-Stops recording and ensures proper file saving.
 ## Icon Matching for Clips
 ✅ **Automatic Clip Thumbnail Generation:** Uses FFmpeg to extract preview frames
 ✅ **Customizable Icons for Clip Categories:** Matches clip type to predefined icons
