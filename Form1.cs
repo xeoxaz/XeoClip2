@@ -13,11 +13,18 @@ namespace XeoClip2
 			InitializeComponent();
 			fileManager = new FileManager();
 			recorder = new Recorder();
+			recorder.RecordingStatusChanged += Recorder_RecordingStatusChanged;
+		}
+
+		private void Recorder_RecordingStatusChanged(string message)
+		{
+			Invoke(new Action(() => toolStripStatusLabel2.Text = message));
 		}
 
 		private void Form1_Load(object sender, EventArgs e)
 		{
 			// No setup required as FileManager initializes the folder
+			toolStripStatusLabel2.Text = "Awaiting command..";
 		}
 
 		private void button1_Click(object sender, EventArgs e)
@@ -51,6 +58,11 @@ namespace XeoClip2
 			{
 				MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
+		}
+
+		private void toolStripStatusLabel1_Click(object sender, EventArgs e)
+		{
+
 		}
 	}
 }

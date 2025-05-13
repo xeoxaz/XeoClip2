@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Threading;
 
 namespace XeoClip2
 {
@@ -10,113 +11,168 @@ namespace XeoClip2
 		private bool isRecording;
 		private string outputFile;
 
-		/// <summary>
-		/// Starts the recording process and returns the output file path.
-		/// </summary>
-		/// <param name="baseFolder">Base folder where recordings will be stored.</param>
-		/// <returns>Path of the output recording file.</returns>
+		public event Action<string> RecordingStatusChanged;
+
+		private void UpdateStatus(string message)
+		{
+			RecordingStatusChanged?.Invoke(message);
+		}
+
 		public string StartRecording(string baseFolder)
 		{
 			if (isRecording)
 				throw new InvalidOperationException("Recording is already in progress.");
 
+			UpdateStatus("Initializing recording process...");
+
+			// Generate timestamped output folder
 			string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
 			string outputFolder = Path.Combine(baseFolder, timestamp);
 			Directory.CreateDirectory(outputFolder);
 
-			outputFile = Path.Combine(outputFolder, "recording.mp4");
+			outputFile = Path.Combine(outputFolder, "recording.flv");
 
+			// Verify FFmpeg path
 			string ffmpegPath = GetFFmpegPath();
 			if (string.IsNullOrEmpty(ffmpegPath))
-				throw new FileNotFoundException("FFmpeg not found. Ensure it is installed and accessible in the PATH.");
+			{
+				UpdateStatus("Error: FFmpeg not found.");
+				throw new FileNotFoundException("FFmpeg executable not found. Ensure it's installed and accessible via PATH.");
+			}
 
+			// Prepare FFmpeg command arguments
 			string ffmpegArgs = GetFFmpegCommand(outputFile);
+			UpdateStatus($"FFmpeg command prepared:\n{ffmpegArgs}");
 
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = ffmpegPath,
 				Arguments = ffmpegArgs,
-				UseShellExecute = true,
+				UseShellExecute = false,
+				RedirectStandardInput = true,
+				RedirectStandardError = true,
+				RedirectStandardOutput = true,
 				CreateNoWindow = false
 			};
 
 			try
 			{
 				ffmpegProcess = new Process { StartInfo = startInfo };
+
+				// Capture FFmpeg output & errors asynchronously
+				ffmpegProcess.OutputDataReceived += (sender, args) =>
+				{
+					if (!string.IsNullOrEmpty(args.Data))
+						UpdateStatus($"FFmpeg Output: {args.Data}");
+						Console.WriteLine($"[FFmpeg Output] {args.Data}");
+				};
+
+				ffmpegProcess.ErrorDataReceived += (sender, args) =>
+				{
+					if (!string.IsNullOrEmpty(args.Data))
+						UpdateStatus($"FFmpeg Error: {args.Data}");
+						Console.WriteLine($"[FFmpeg Error] {args.Data}");
+				};
+
+				// Start FFmpeg recording
 				ffmpegProcess.Start();
+				ffmpegProcess.BeginOutputReadLine();
+				ffmpegProcess.BeginErrorReadLine();
+				ffmpegProcess.PriorityClass = ProcessPriorityClass.RealTime;
+
 				isRecording = true;
+				UpdateStatus("Recording started successfully.");
 				return outputFile;
 			}
 			catch (Exception ex)
 			{
-				throw new InvalidOperationException("Failed to start recording.", ex);
+				UpdateStatus($"Recording failed: {ex.Message}");
+				throw new InvalidOperationException("Failed to start recording due to an unexpected error.", ex);
 			}
 		}
 
-		/// <summary>
-		/// Stops the ongoing recording process and ensures the file is saved and formatted correctly.
-		/// </summary>
 		public void StopRecording()
 		{
 			if (!isRecording)
-				throw new InvalidOperationException("No recording is in progress to stop.");
+				throw new InvalidOperationException("No recording in progress to stop.");
 
-			if (ffmpegProcess != null && !ffmpegProcess.HasExited)
+			UpdateStatus("Stopping recording, please wait...");
+
+			Thread cleanupThread = new Thread(() =>
 			{
-				try
+				if (ffmpegProcess != null && !ffmpegProcess.HasExited)
 				{
-					// Send 'q' to gracefully stop FFmpeg process
-					if (ffmpegProcess.StartInfo.RedirectStandardInput)
+					try
 					{
-						using (var writer = ffmpegProcess.StandardInput)
+						UpdateStatus("Sending stop signal to FFmpeg...");
+						ffmpegProcess.StandardInput.WriteLine("q");
+						ffmpegProcess.StandardInput.Flush();
+
+						ffmpegProcess.WaitForExit(5000);
+
+						if (!ffmpegProcess.HasExited)
 						{
-							writer.WriteLine("q");
-							writer.Flush();
+							UpdateStatus("Forcing FFmpeg termination...");
+							ffmpegProcess.Kill();
+							ffmpegProcess.WaitForExit();
 						}
 					}
-
-					// Wait for the process to flush its output
-					ffmpegProcess.WaitForExit(3000);
-
-					// Forcefully terminate if still running
-					if (!ffmpegProcess.HasExited)
+					catch (Exception ex)
 					{
-						ffmpegProcess.Kill();
-						ffmpegProcess.WaitForExit();
+						UpdateStatus("Recording termination error. See logs.");
+						throw new InvalidOperationException("Failed to stop recording.", ex);
+					}
+					finally
+					{
+						UpdateStatus("Cleaning up FFmpeg process...");
+						ffmpegProcess.Dispose();
+						ffmpegProcess = null;
 					}
 				}
-				catch (Exception ex)
-				{
-					throw new InvalidOperationException("Failed to stop recording.", ex);
-				}
-				finally
-				{
-					ffmpegProcess.Dispose();
-					ffmpegProcess = null;
-				}
-			}
 
-			// Validate the output file
-			ValidateOutputFile();
-			isRecording = false;
+				EnsureFileIsSaved();
+				isRecording = false;
+
+				UpdateStatus("Recording successfully stopped.");
+			})
+			{
+				Priority = ThreadPriority.Highest
+			};
+
+			cleanupThread.Start();
 		}
 
-		private void ValidateOutputFile()
+		private void EnsureFileIsSaved()
 		{
-			if (string.IsNullOrEmpty(outputFile) || !File.Exists(outputFile))
-				throw new InvalidOperationException("The recording file was not saved properly.");
+			try
+			{
+				UpdateStatus("Validating recorded file...");
 
-			FileInfo fileInfo = new FileInfo(outputFile);
-			if (fileInfo.Length == 0)
-				throw new InvalidOperationException("The recording file is empty.");
+				if (string.IsNullOrEmpty(outputFile) || !File.Exists(outputFile))
+				{
+					UpdateStatus("Recording file missing, process failed.");
+					throw new InvalidOperationException("Recording file was not saved properly.");
+				}
+
+				FileInfo fileInfo = new FileInfo(outputFile);
+				if (fileInfo.Length == 0)
+				{
+					UpdateStatus("Warning: The recorded file is empty.");
+					throw new InvalidOperationException("The recorded file is empty.");
+				}
+
+				UpdateStatus("Recording file saved successfully.");
+			}
+			catch (Exception ex)
+			{
+				UpdateStatus($"Error during file validation: {ex.Message}");
+//				throw; // Re-throwing to ensure caller handles it appropriately
+			}
 		}
 
-		/// <summary>
-		/// Locates the FFmpeg executable path.
-		/// </summary>
-		/// <returns>Path to the FFmpeg executable.</returns>
 		private string GetFFmpegPath()
 		{
+			UpdateStatus("Locating FFmpeg executable...");
 			var processStartInfo = new ProcessStartInfo
 			{
 				FileName = "where",
@@ -133,44 +189,38 @@ namespace XeoClip2
 					string output = process.StandardOutput.ReadToEnd().Trim();
 					process.WaitForExit();
 					string[] paths = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-					return paths.Length > 0 ? paths[0] : null;
+					string foundPath = paths.Length > 0 ? paths[0] : null;
+
+					UpdateStatus(foundPath != null ? "FFmpeg found." : "FFmpeg not detected.");
+					return foundPath;
 				}
 			}
 
+			UpdateStatus("FFmpeg executable lookup failed.");
 			return null;
 		}
 
-		/// <summary>
-		/// Constructs the FFmpeg command arguments.
-		/// </summary>
-		/// <param name="outputFile">Output file path for the recording.</param>
-		/// <returns>FFmpeg command arguments.</returns>
 		private string GetFFmpegCommand(string outputFile)
 		{
-			return $"-hwaccel cuda -f gdigrab -framerate 60 -video_size 1920x1080 -i desktop -c:v h264_nvenc -preset p1 \"{outputFile}\"";
+			UpdateStatus("Configuring FFmpeg with virtual-audio-capturer...");
+
+			return $"-f dshow -i audio=\"virtual-audio-capturer\":video=\"screen-capture-recorder\" " +
+				   $"-c:v libx264 -preset ultrafast -b:v 4000k -maxrate 4000k -bufsize 8000k -pix_fmt yuv420p " +
+				   $"-c:a aac -b:a 128k -ar 44100 -ac 2 -f flv \"{outputFile}\"";
 		}
 
-		/// <summary>
-		/// Disposes resources used by the recorder.
-		/// </summary>
+
+
 		public void Dispose()
 		{
 			if (isRecording)
 			{
+				UpdateStatus("Disposing recorder and stopping any active processes...");
 				StopRecording();
 			}
 
-			if (ffmpegProcess != null)
-			{
-				if (!ffmpegProcess.HasExited)
-				{
-					ffmpegProcess.Kill();
-					ffmpegProcess.WaitForExit();
-				}
-
-				ffmpegProcess.Dispose();
-				ffmpegProcess = null;
-			}
+			UpdateStatus("Final cleanup...");
+			ffmpegProcess?.Dispose();
 		}
 
 		public bool IsRecording => isRecording;
