@@ -54,7 +54,7 @@ namespace XeoClip2
 		}
 
 		/// <summary>
-		/// Stops the ongoing recording process.
+		/// Stops the ongoing recording process and ensures the file is saved and formatted correctly.
 		/// </summary>
 		public void StopRecording()
 		{
@@ -65,8 +65,25 @@ namespace XeoClip2
 			{
 				try
 				{
-					ffmpegProcess.Kill();
-					ffmpegProcess.WaitForExit();
+					// Send 'q' to gracefully stop FFmpeg process
+					if (ffmpegProcess.StartInfo.RedirectStandardInput)
+					{
+						using (var writer = ffmpegProcess.StandardInput)
+						{
+							writer.WriteLine("q");
+							writer.Flush();
+						}
+					}
+
+					// Wait for the process to flush its output
+					ffmpegProcess.WaitForExit(3000);
+
+					// Forcefully terminate if still running
+					if (!ffmpegProcess.HasExited)
+					{
+						ffmpegProcess.Kill();
+						ffmpegProcess.WaitForExit();
+					}
 				}
 				catch (Exception ex)
 				{
@@ -79,7 +96,19 @@ namespace XeoClip2
 				}
 			}
 
+			// Validate the output file
+			ValidateOutputFile();
 			isRecording = false;
+		}
+
+		private void ValidateOutputFile()
+		{
+			if (string.IsNullOrEmpty(outputFile) || !File.Exists(outputFile))
+				throw new InvalidOperationException("The recording file was not saved properly.");
+
+			FileInfo fileInfo = new FileInfo(outputFile);
+			if (fileInfo.Length == 0)
+				throw new InvalidOperationException("The recording file is empty.");
 		}
 
 		/// <summary>
@@ -126,6 +155,11 @@ namespace XeoClip2
 		/// </summary>
 		public void Dispose()
 		{
+			if (isRecording)
+			{
+				StopRecording();
+			}
+
 			if (ffmpegProcess != null)
 			{
 				if (!ffmpegProcess.HasExited)
