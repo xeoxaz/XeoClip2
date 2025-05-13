@@ -9,6 +9,7 @@ namespace XeoClip2
 	{
 		private bool isRecording = false;
 		private Process ffmpegProcess;
+		private string baseFolder;
 		private string outputFolder;
 		private string outputFile;
 
@@ -19,7 +20,9 @@ namespace XeoClip2
 
 		private void Form1_Load(object sender, EventArgs e)
 		{
-			// No folder creation on load
+			string tempPath = Path.GetTempPath();
+			baseFolder = Path.Combine(tempPath, "XeoClip2");
+			Directory.CreateDirectory(baseFolder);
 		}
 
 		private void button1_Click(object sender, EventArgs e)
@@ -29,14 +32,13 @@ namespace XeoClip2
 
 		private void button2_Click(object sender, EventArgs e)
 		{
-			// Open the video storage folder
-			if (Directory.Exists(outputFolder))
+			if (Directory.Exists(baseFolder))
 			{
-				Process.Start("explorer.exe", outputFolder);
+				Process.Start("explorer.exe", baseFolder);
 			}
 			else
 			{
-				MessageBox.Show("The output folder does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				MessageBox.Show("The base folder does not exist.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 			}
 		}
 
@@ -54,9 +56,8 @@ namespace XeoClip2
 
 		private void StartRecording()
 		{
-			// Create folder only when recording starts
-			string tempPath = Path.GetTempPath();
-			outputFolder = Path.Combine(tempPath, "XeoClip_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+			string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+			outputFolder = Path.Combine(baseFolder, timestamp);
 
 			try
 			{
@@ -86,17 +87,16 @@ namespace XeoClip2
 
 			outputFile = Path.Combine(outputFolder, "recording.mp4");
 
-			// FFmpeg command to record desktop with audio
-			string ffmpegArgs = $"-f gdigrab -framerate 30 -i desktop -f dshow -i audio=\"virtual-audio-capturer\" " +
-								$"-c:v libx264 -preset ultrafast -crf 18 -pix_fmt yuv420p -c:a aac -b:a 128k \"{outputFile}\"";
+			string ffmpegArgs = GetFFmpegCommand(outputFile);
 
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = ffmpegPath,
 				Arguments = ffmpegArgs,
-				RedirectStandardError = true,
-				UseShellExecute = false,
-				CreateNoWindow = true
+				RedirectStandardOutput = false,
+				RedirectStandardError = false,
+				UseShellExecute = true, // Open in a new console window
+				CreateNoWindow = false
 			};
 
 			try
@@ -135,7 +135,7 @@ namespace XeoClip2
 
 		private string GetFFmpegPath()
 		{
-			var ffmpegPath = "ffmpeg"; // Assuming "ffmpeg" is in the PATH
+			var ffmpegPath = "ffmpeg";
 			var processStartInfo = new ProcessStartInfo
 			{
 				FileName = "where",
@@ -158,5 +158,11 @@ namespace XeoClip2
 
 			return null;
 		}
+
+		private string GetFFmpegCommand(string outputFile)
+			=> $"-hwaccel cuda -loglevel error -nostats -hide_banner -f gdigrab " +
+			   $"-framerate 60 -video_size 1920x1080 -offset_x 0 -offset_y 0 -rtbufsize 100M " +
+			   $"-i desktop -c:v h264_nvenc -preset p1 -pix_fmt yuv420p -rc:v vbr_hq -cq:v 21 " +
+			   $"-b:v 8M -maxrate:v 16M -bufsize:v 32M -vsync cfr -f mp4 \"{outputFile}\"";
 	}
 }
