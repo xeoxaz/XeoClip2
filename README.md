@@ -27,3 +27,11 @@ ffmpeg -list_devices true -f dshow -i dummy
 Ensure `"screen-capture-recorder"` appears in the device list.
 
 📌 **Audio Issues?** Verify system audio source by selecting `"virtual-audio-capturer"` in sound settings.
+
+# XeoClip :: Project
+You can follow the overall project and it's plans.
+[XeoClip Project](https://github.com/users/xeoxaz/projects/2)
+
+## XeoClip :: Repository
+See the archived project.
+[First Repsitory](https://github.com/xeoxaz/XeoClip)
